@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Data files (leaderboard will be created at runtime)
+data/*.json
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Optional
+*.bak
+*.tmp

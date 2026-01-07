@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>6KODA - Indian Card Game</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🃏</text></svg>">
+</head>
+<body>
+  <div class="container">
+    
+    <!-- MENU -->
+    <div id="menuScreen" class="screen">
+      <div class="logo">
+        <h1>6KODA</h1>
+        <p class="tagline">Don't be the last one holding cards!</p>
+      </div>
+      
+      <div class="menu-card">
+        <input type="text" id="playerName" placeholder="Enter your name" maxlength="12" autocomplete="off">
+        <button id="createRoomBtn" class="btn primary">Create Room</button>
+        <div class="divider"><span>OR</span></div>
+        <input type="text" id="roomCodeInput" placeholder="Room Code" maxlength="6" autocomplete="off">
+        <button id="joinRoomBtn" class="btn secondary">Join Room</button>
+      </div>
+      
+      <button id="leaderboardBtn" class="btn ghost">🏆 Leaderboard</button>
+      
+      <div class="rules-box">
+        <h3>Special Cards</h3>
+        <div class="rules-grid">
+          <span class="rule">2 ⭐ Anytime</span>
+          <span class="rule">3 👻 Transparent</span>
+          <span class="rule">7 ⬇️ Play Low</span>
+          <span class="rule">10 🔥 Burn</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOBBY -->
+    <div id="lobbyScreen" class="screen hidden">
+      <h2>Game Lobby</h2>
+      <div class="room-code-box">
+        <span class="label">ROOM CODE</span>
+        <span id="roomCodeDisplay" class="code"></span>
+        <span class="hint">Share this with friends!</span>
+      </div>
+      <div class="players-box">
+        <h3>Players</h3>
+        <div id="playerList"></div>
+      </div>
+      <div class="lobby-actions">
+        <button id="readyBtn" class="btn secondary">I'm Ready</button>
+        <button id="startGameBtn" class="btn primary hidden">Start Game</button>
+      </div>
+    </div>
+
+    <!-- GAME -->
+    <div id="gameScreen" class="screen hidden">
+      <div id="opponentsArea"></div>
+      
+      <div id="centerArea">
+        <div id="deckArea" class="center-item">
+          <div class="card back"><span id="deckCount">0</span></div>
+          <span class="label">DECK</span>
+        </div>
+        <div id="pileArea" class="center-item">
+          <div id="pile" class="pile-zone"></div>
+          <span class="label">PILE <span id="pileCount">(0)</span></span>
+        </div>
+        <div id="burnArea" class="center-item">
+          <div class="burn-zone">🔥</div>
+          <span class="label">BURNED</span>
+        </div>
+      </div>
+      
+      <div id="statusArea">
+        <div id="turnIndicator"></div>
+        <div id="sevenWarning" class="warning hidden">⚠️ Must play 7 or lower!</div>
+        <div id="effectiveCard" class="info hidden"></div>
+      </div>
+      
+      <div id="myArea">
+        <div class="card-section">
+          <span class="label">Face Down</span>
+          <div id="myFaceDown" class="card-row"></div>
+        </div>
+        <div class="card-section">
+          <span class="label">Face Up</span>
+          <div id="myFaceUp" class="card-row"></div>
+        </div>
+        <div class="card-section">
+          <span class="label">Your Hand</span>
+          <div id="myHand" class="card-row"></div>
+        </div>
+      </div>
+      
+      <div id="actionArea">
+        <button id="playBtn" class="btn primary">Play</button>
+        <button id="drawCardBtn" class="btn secondary hidden">Draw</button>
+        <button id="pickUpBtn" class="btn danger">Pick Up</button>
+        <button id="confirmSwapBtn" class="btn secondary hidden">Done Swapping</button>
+      </div>
+      
+      <div id="gameLog"></div>
+    </div>
+
+    <!-- LEADERBOARD -->
+    <div id="leaderboardScreen" class="screen hidden">
+      <h2>🏆 Leaderboard</h2>
+      <div id="leaderboardList"></div>
+      <button id="backBtn" class="btn ghost">← Back</button>
+    </div>
+
+    <!-- GAME OVER -->
+    <div id="gameOverModal" class="modal hidden">
+      <div class="modal-box">
+        <h2>Game Over!</h2>
+        <p id="gameOverMessage"></p>
+        <div class="modal-actions">
+          <button id="playAgainBtn" class="btn primary">Play Again</button>
+          <button id="exitBtn" class="btn ghost">Exit</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FORCED CARD -->
+    <div id="forcedCardModal" class="modal hidden">
+      <div class="modal-box">
+        <h2>🎴 You Drew a Card!</h2>
+        <p>Your hand is full. Play or pick up pile.</p>
+        <div id="forcedCardDisplay"></div>
+        <div id="forcedCardStatus"></div>
+        <div class="modal-actions">
+          <button id="playForcedBtn" class="btn primary">Play</button>
+          <button id="declineForcedBtn" class="btn danger">Pick Up Pile</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOAST -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
