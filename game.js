@@ -1,558 +1,574 @@
 class Game {
-  constructor(players) {
-    if (!Array.isArray(players) || players.length < 2) {
-      throw new Error('Need at least 2 players');
-    }
-    if (players.length > 5) {
-      throw new Error('Maximum 5 players allowed');
-    }
-
-    this.players = players.map(p => ({
-      id: p.id,
-      name: p.name || 'Unknown',
-      hand: [],
-      faceUp: [],
-      faceDown: [],
-      ready: false,
-      finished: false
-    }));
-
-    this.deck = [];
-    this.pile = [];
-    this.burnedCards = [];
-    this.currentPlayerIndex = 0;
-    this.phase = 'setup';
-    this.mustPlayLowCard = false;
-    this.forcedCard = null;
-    this.gameStartTime = Date.now();
-  }
-
-  // ==================== DECK ====================
-
-  createDeck() {
-    const suits = ['hearts', 'diamonds', 'clubs', 'spades'];
-    const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-    this.deck = [];
-
-    for (const suit of suits) {
-      for (const value of values) {
-        this.deck.push({
-          suit,
-          value,
-          id: `${value}_${suit}_${Math.random().toString(36).substr(2, 9)}`
+    constructor(players) {
+        this.players = new Map();
+        this.playerOrder = [];
+        this.currentPlayerIndex = 0;
+        this.deck = [];
+        this.pile = [];
+        this.burnPile = [];
+        this.phase = 'setup'; // setup, playing, finished
+        this.mustPlayLowCard = false;
+        this.forcedCard = null;
+        this.forcedPlayerId = null;
+        
+        players.forEach(p => {
+            this.players.set(p.id, {
+                id: p.id,
+                name: p.name,
+                hand: [],
+                faceUp: [],
+                faceDown: [],
+                ready: false,
+                finished: false,
+                finishOrder: null
+            });
+            this.playerOrder.push(p.id);
         });
-      }
+        
+        this.createDeck();
+        this.shuffle();
     }
 
-    // Fisher-Yates shuffle
-    for (let i = this.deck.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this.deck[i], this.deck[j]] = [this.deck[j], this.deck[i]];
-    }
-  }
-
-  deal() {
-    if (this.phase !== 'setup') {
-      return { error: 'Can only deal during setup' };
-    }
-
-    this.createDeck();
-
-    for (const player of this.players) {
-      player.faceDown = this.deck.splice(0, 3);
-      player.faceUp = this.deck.splice(0, 3);
-      player.hand = this.deck.splice(0, 3);
-      player.ready = false;
-      player.finished = false;
+    createDeck() {
+        const suits = ['♠', '♥', '♦', '♣'];
+        const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+        
+        this.deck = [];
+        for (const suit of suits) {
+            for (const value of values) {
+                this.deck.push({ suit, value, id: `${value}${suit}` });
+            }
+        }
     }
 
-    this.pile = [];
-    this.burnedCards = [];
-    this.mustPlayLowCard = false;
-    this.forcedCard = null;
-    this.currentPlayerIndex = 0;
-    this.phase = 'swapping';
-
-    return { success: true };
-  }
-
-  // ==================== HELPERS ====================
-
-  getPlayer(playerId) {
-    return this.players.find(p => p.id === playerId) || null;
-  }
-
-  getCurrentPlayer() {
-    return this.players[this.currentPlayerIndex] || null;
-  }
-
-  isCurrentPlayer(playerId) {
-    const current = this.getCurrentPlayer();
-    return current && current.id === playerId;
-  }
-
-  validateTurn(playerId) {
-    if (this.phase !== 'playing') {
-      return { valid: false, error: 'Game is not in playing phase' };
-    }
-    if (!this.isCurrentPlayer(playerId)) {
-      return { valid: false, error: 'Not your turn!' };
-    }
-    const player = this.getPlayer(playerId);
-    if (!player) {
-      return { valid: false, error: 'Player not found' };
-    }
-    if (player.finished) {
-      return { valid: false, error: 'You already finished!' };
-    }
-    return { valid: true, player };
-  }
-
-  getPlaySource(player) {
-    if (!player) return null;
-    if (player.hand?.length > 0) return 'hand';
-    if (player.faceUp?.length > 0) return 'faceUp';
-    if (player.faceDown?.length > 0) return 'faceDown';
-    return null;
-  }
-
-  getCardValue(card) {
-    if (!card?.value) return 0;
-    const values = {
-      '2': 15, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7,
-      '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14
-    };
-    return values[card.value] || 0;
-  }
-
-  getSuitSymbol(suit) {
-    const symbols = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
-    return symbols[suit] || '';
-  }
-
-  formatCard(card) {
-    if (!card) return '?';
-    return `${card.value}${this.getSuitSymbol(card.suit)}`;
-  }
-
-  getEffectiveTopCard() {
-    if (!this.pile?.length) return null;
-    for (let i = this.pile.length - 1; i >= 0; i--) {
-      if (this.pile[i]?.value !== '3') {
-        return this.pile[i];
-      }
-    }
-    return null;
-  }
-
-  canPlayCard(card) {
-    if (!card?.value) return false;
-    if (!this.pile?.length) return true;
-    if (['2', '10', '3'].includes(card.value)) return true;
-    if (this.mustPlayLowCard) {
-      return this.getCardValue(card) <= 7;
-    }
-    const effective = this.getEffectiveTopCard();
-    if (!effective) return true;
-    return this.getCardValue(card) >= this.getCardValue(effective);
-  }
-
-  checkFourOfAKind() {
-    if (!this.pile || this.pile.length < 4) return false;
-    const lastFour = this.pile.slice(-4);
-    return lastFour.every(c => c?.value === lastFour[0]?.value);
-  }
-
-  burnPile() {
-    this.burnedCards.push(...this.pile);
-    this.pile = [];
-    this.mustPlayLowCard = false;
-  }
-
-  checkPlayerFinished(player) {
-    if (!player) return;
-    const total = (player.hand?.length || 0) +
-                  (player.faceUp?.length || 0) +
-                  (player.faceDown?.length || 0);
-    if (total === 0) {
-      player.finished = true;
-    }
-  }
-
-  nextPlayer() {
-    if (this.isGameOver()) {
-      this.phase = 'ended';
-      return;
-    }
-    const start = this.currentPlayerIndex;
-    let loops = 0;
-    do {
-      this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
-      loops++;
-      if (loops > this.players.length + 1) break;
-    } while (this.players[this.currentPlayerIndex].finished && this.currentPlayerIndex !== start);
-  }
-
-  isGameOver() {
-    return this.players.filter(p => !p.finished).length <= 1;
-  }
-
-  getLoser() {
-    return this.players.find(p => !p.finished) || null;
-  }
-
-  // ==================== SWAPPING ====================
-
-  swapCards(playerId, handIndex, faceUpIndex) {
-    if (this.phase !== 'swapping') {
-      return { error: 'Can only swap during swapping phase' };
-    }
-    const player = this.getPlayer(playerId);
-    if (!player) return { error: 'Player not found' };
-    if (player.ready) return { error: 'Already confirmed ready' };
-    if (typeof handIndex !== 'number' || typeof faceUpIndex !== 'number') {
-      return { error: 'Invalid indices' };
-    }
-    if (handIndex < 0 || handIndex >= player.hand.length) {
-      return { error: 'Invalid hand index' };
-    }
-    if (faceUpIndex < 0 || faceUpIndex >= player.faceUp.length) {
-      return { error: 'Invalid face-up index' };
+    shuffle() {
+        for (let i = this.deck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [this.deck[i], this.deck[j]] = [this.deck[j], this.deck[i]];
+        }
     }
 
-    const temp = player.hand[handIndex];
-    player.hand[handIndex] = player.faceUp[faceUpIndex];
-    player.faceUp[faceUpIndex] = temp;
-
-    return { success: true };
-  }
-
-  confirmReady(playerId) {
-    if (this.phase !== 'swapping') {
-      return { error: 'Not in swapping phase' };
-    }
-    const player = this.getPlayer(playerId);
-    if (!player) return { error: 'Player not found' };
-    player.ready = true;
-    return { success: true };
-  }
-
-  allReady() {
-    return this.players.every(p => p.ready);
-  }
-
-  startPlay() {
-    if (this.phase !== 'swapping') {
-      return { error: 'Not in swapping phase' };
-    }
-    if (!this.allReady()) {
-      return { error: 'Not all players ready' };
-    }
-    this.phase = 'playing';
-    this.currentPlayerIndex = 0;
-    this.players.forEach(p => p.ready = false);
-    return { success: true };
-  }
-
-  // ==================== PICK FROM DECK ====================
-
-  pickFromDeck(playerId) {
-    const validation = this.validateTurn(playerId);
-    if (!validation.valid) return { error: validation.error };
-
-    const player = validation.player;
-    const source = this.getPlaySource(player);
-
-    if (source !== 'hand') {
-      return { error: 'Can only draw from deck when playing from hand!' };
-    }
-    if (!this.deck?.length) {
-      return { error: 'Deck is empty!' };
-    }
-    if (this.forcedCard?.playerId === playerId) {
-      return { error: 'Must play or decline the drawn card first!' };
+    deal() {
+        // Deal 3 face-down, 3 face-up, 3 in hand to each player
+        for (const [id, player] of this.players) {
+            player.faceDown = this.deck.splice(0, 3);
+            player.faceUp = this.deck.splice(0, 3);
+            player.hand = this.deck.splice(0, 3);
+        }
     }
 
-    const pickedCard = this.deck.pop();
-    if (!pickedCard) return { error: 'Failed to draw card' };
-
-    if (player.hand.length < 3) {
-      player.hand.push(pickedCard);
-      return {
-        action: `${player.name} drew a card (${this.formatCard(pickedCard)})`,
-        pickedCard,
-        mustPlay: false
-      };
-    } else {
-      this.forcedCard = { playerId, card: pickedCard };
-      return {
-        action: `${player.name} drew ${this.formatCard(pickedCard)} - must play or decline!`,
-        pickedCard,
-        mustPlay: true,
-        canPlayIt: this.canPlayCard(pickedCard)
-      };
-    }
-  }
-
-  playForcedCard(playerId) {
-    const player = this.getPlayer(playerId);
-    if (!player) return { error: 'Player not found' };
-    if (!this.forcedCard || this.forcedCard.playerId !== playerId) {
-      return { error: 'No forced card to play!' };
-    }
-
-    const card = this.forcedCard.card;
-
-    if (!this.canPlayCard(card)) {
-      player.hand.push(...this.pile, card);
-      this.pile = [];
-      this.mustPlayLowCard = false;
-      this.forcedCard = null;
-      this.nextPlayer();
-      return {
-        action: `${player.name} couldn't play ${this.formatCard(card)} - picked up pile! 😅`
-      };
+    swapCards(playerId, handIndex, faceUpIndex) {
+        if (this.phase !== 'setup') {
+            return { success: false, error: 'Cannot swap cards now' };
+        }
+        
+        const player = this.players.get(playerId);
+        if (!player) {
+            return { success: false, error: 'Player not found' };
+        }
+        
+        if (player.ready) {
+            return { success: false, error: 'Already ready' };
+        }
+        
+        if (handIndex < 0 || handIndex >= player.hand.length ||
+            faceUpIndex < 0 || faceUpIndex >= player.faceUp.length) {
+            return { success: false, error: 'Invalid card index' };
+        }
+        
+        // Swap cards
+        const temp = player.hand[handIndex];
+        player.hand[handIndex] = player.faceUp[faceUpIndex];
+        player.faceUp[faceUpIndex] = temp;
+        
+        return { success: true };
     }
 
-    this.pile.push(card);
-    this.forcedCard = null;
-    this.mustPlayLowCard = false;
-
-    let action = `${player.name} played ${this.formatCard(card)}`;
-    let sameTurn = false;
-
-    const result = this.handleSpecialCard(card, player);
-    action += result.suffix;
-    sameTurn = result.sameTurn;
-
-    if (!sameTurn) this.nextPlayer();
-
-    this.checkPlayerFinished(player);
-    if (player.finished) action += ` - ${player.name} is OUT! 🎉`;
-
-    return { action };
-  }
-
-  declineForcedCard(playerId) {
-    const player = this.getPlayer(playerId);
-    if (!player) return { error: 'Player not found' };
-    if (!this.forcedCard || this.forcedCard.playerId !== playerId) {
-      return { error: 'No forced card!' };
+    setPlayerReady(playerId) {
+        if (this.phase !== 'setup') {
+            return { success: false, error: 'Game already started' };
+        }
+        
+        const player = this.players.get(playerId);
+        if (!player) {
+            return { success: false, error: 'Player not found' };
+        }
+        
+        player.ready = true;
+        
+        // Check if all players are ready
+        let allReady = true;
+        for (const [, p] of this.players) {
+            if (!p.ready) {
+                allReady = false;
+                break;
+            }
+        }
+        
+        if (allReady) {
+            this.phase = 'playing';
+        }
+        
+        return { success: true, gameStarted: allReady };
     }
 
-    const card = this.forcedCard.card;
-    player.hand.push(...this.pile, card);
-    this.pile = [];
-    this.mustPlayLowCard = false;
-    this.forcedCard = null;
-    this.nextPlayer();
-
-    return {
-      action: `${player.name} declined ${this.formatCard(card)} and picked up pile 📥`
-    };
-  }
-
-  // ==================== PLAY CARDS ====================
-
-  playCards(playerId, cardIndices) {
-    const validation = this.validateTurn(playerId);
-    if (!validation.valid) return { error: validation.error };
-
-    const player = validation.player;
-
-    if (this.forcedCard?.playerId === playerId) {
-      return { error: 'Must play or decline drawn card first!' };
-    }
-    if (!Array.isArray(cardIndices) || !cardIndices.length) {
-      return { error: 'No cards selected!' };
+    getCardValue(card) {
+        const values = {
+            '2': 15, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7,
+            '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14
+        };
+        return values[card.value] || 0;
     }
 
-    const uniqueIndices = [...new Set(cardIndices)].filter(i => typeof i === 'number' && i >= 0);
-    if (!uniqueIndices.length) return { error: 'Invalid selection!' };
-
-    const source = this.getPlaySource(player);
-    if (!source) return { error: 'No cards to play!' };
-
-    const sourceCards = player[source];
-    for (const idx of uniqueIndices) {
-      if (idx >= sourceCards.length) return { error: 'Invalid card index!' };
+    // Sort cards by value for hand organization
+    sortCards(cards) {
+        const valueOrder = {
+            '2': 15, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5,
+            '8': 6, '9': 7, '10': 8, 'J': 9, 'Q': 10, 'K': 11, 'A': 12
+        };
+        return cards.sort((a, b) => valueOrder[a.value] - valueOrder[b.value]);
     }
 
-    const cards = uniqueIndices.map(i => sourceCards[i]).filter(c => c);
-    if (!cards.length) return { error: 'No valid cards!' };
-
-    const firstValue = cards[0].value;
-    if (!cards.every(c => c.value === firstValue)) {
-      return { error: 'All cards must have same value!' };
+    getEffectiveTopCard() {
+        // Look through pile from top, ignoring 3s (transparent)
+        for (let i = this.pile.length - 1; i >= 0; i--) {
+            if (this.pile[i].value !== '3') {
+                return this.pile[i];
+            }
+        }
+        return null; // All 3s or empty pile
     }
 
-    // Face down - blind play
-    if (source === 'faceDown') {
-      if (uniqueIndices.length !== 1) {
-        return { error: 'Must flip one card at a time!' };
-      }
-      const card = cards[0];
-      player.faceDown = player.faceDown.filter((_, i) => i !== uniqueIndices[0]);
+    canPlayCard(card) {
+        // 2 and 10 can always be played
+        if (card.value === '2' || card.value === '10') {
+            return true;
+        }
+        
+        // 3 (transparent) can always be played
+        if (card.value === '3') {
+            return true;
+        }
+        
+        // If must play low card (after 7)
+        if (this.mustPlayLowCard) {
+            return this.getCardValue(card) <= 7;
+        }
+        
+        // Empty pile - anything goes
+        if (this.pile.length === 0) {
+            return true;
+        }
+        
+        const topCard = this.getEffectiveTopCard();
+        
+        // If effective top is null (all 3s), anything goes
+        if (!topCard) {
+            return true;
+        }
+        
+        // BUG 1 FIX: If top card is a 2, anything can be played on it
+        // (2 resets the pile - any card can follow)
+        if (topCard.value === '2') {
+            return true;
+        }
+        
+        // Must play equal or higher
+        return this.getCardValue(card) >= this.getCardValue(topCard);
+    }
 
-      if (!this.canPlayCard(card)) {
-        player.hand.push(...this.pile, card);
+    playCards(playerId, cardIndices, source) {
+        if (this.phase !== 'playing') {
+            return { success: false, error: 'Game not in playing phase' };
+        }
+        
+        const currentPlayerId = this.playerOrder[this.currentPlayerIndex];
+        if (playerId !== currentPlayerId) {
+            return { success: false, error: 'Not your turn' };
+        }
+        
+        // Check for forced card situation
+        if (this.forcedCard && this.forcedPlayerId === playerId) {
+            return { success: false, error: 'Must play or decline forced card' };
+        }
+        
+        const player = this.players.get(playerId);
+        if (!player) {
+            return { success: false, error: 'Player not found' };
+        }
+        
+        // Determine source
+        let sourceCards;
+        if (source === 'hand' && player.hand.length > 0) {
+            sourceCards = player.hand;
+        } else if (source === 'faceUp' && player.hand.length === 0 && player.faceUp.length > 0) {
+            sourceCards = player.faceUp;
+        } else if (source === 'faceDown' && player.hand.length === 0 && player.faceUp.length === 0 && player.faceDown.length > 0) {
+            sourceCards = player.faceDown;
+        } else {
+            return { success: false, error: 'Invalid card source' };
+        }
+        
+        // Validate indices
+        if (!cardIndices || cardIndices.length === 0) {
+            return { success: false, error: 'No cards selected' };
+        }
+        
+        const uniqueIndices = [...new Set(cardIndices)].sort((a, b) => b - a);
+        
+        for (const idx of uniqueIndices) {
+            if (idx < 0 || idx >= sourceCards.length) {
+                return { success: false, error: 'Invalid card index' };
+            }
+        }
+        
+        // Get the cards
+        const cards = uniqueIndices.map(i => sourceCards[i]);
+        
+        // Check if all cards have the same value
+        const firstValue = cards[0].value;
+        if (!cards.every(c => c.value === firstValue)) {
+            return { success: false, error: 'All cards must have the same value' };
+        }
+        
+        // For face-down cards, we play blind
+        if (source === 'faceDown') {
+            const card = cards[0]; // Can only play one face-down at a time
+            
+            // Remove from face-down
+            player.faceDown.splice(uniqueIndices[0], 1);
+            
+            // Check if playable
+            if (this.canPlayCard(card)) {
+                this.pile.push(card);
+                return this.processAfterPlay(playerId, [card]);
+            } else {
+                // Must pick up pile + the card
+                player.hand.push(card, ...this.pile);
+                // BUG 4 FIX: Sort the hand after picking up
+                player.hand = this.sortCards(player.hand);
+                this.pile = [];
+                this.mustPlayLowCard = false;
+                this.nextPlayer();
+                return { success: true, pickedUp: true };
+            }
+        }
+        
+        // Check if cards can be played
+        if (!this.canPlayCard(cards[0])) {
+            return { success: false, error: 'Cannot play this card' };
+        }
+        
+        // Remove cards from source and add to pile
+        for (const idx of uniqueIndices) {
+            sourceCards.splice(idx, 1);
+        }
+        
+        this.pile.push(...cards);
+        
+        return this.processAfterPlay(playerId, cards);
+    }
+
+    processAfterPlay(playerId, cards) {
+        const player = this.players.get(playerId);
+        const card = cards[0];
+        
+        // Draw cards if deck has cards and hand has less than 3
+        while (this.deck.length > 0 && player.hand.length < 3) {
+            player.hand.push(this.deck.shift());
+        }
+        // Sort hand after drawing
+        player.hand = this.sortCards(player.hand);
+        
+        // Check for burn (10 or four of a kind)
+        const shouldBurn = card.value === '10' || this.checkFourOfAKind();
+        
+        if (shouldBurn) {
+            this.burnPile.push(...this.pile);
+            this.pile = [];
+            this.mustPlayLowCard = false;
+            // Same player goes again
+            
+            // Check if player finished
+            if (this.checkPlayerFinished(playerId)) {
+                this.nextPlayer();
+                return { success: true, burned: true, finished: true };
+            }
+            
+            return { success: true, burned: true };
+        }
+        
+        // BUG 3 FIX: Handle mustPlayLowCard with transparent 3
+        // Only update mustPlayLowCard based on the EFFECTIVE card played
+        if (card.value === '7') {
+            // 7 was played - next player must play 7 or lower
+            this.mustPlayLowCard = true;
+        } else if (card.value === '3') {
+            // 3 is transparent - don't change mustPlayLowCard
+            // It keeps whatever state it had before
+        } else if (card.value === '2') {
+            // 2 resets everything
+            this.mustPlayLowCard = false;
+        } else {
+            // Any other card clears the mustPlayLowCard requirement
+            this.mustPlayLowCard = false;
+        }
+        
+        // Check if player finished
+        if (this.checkPlayerFinished(playerId)) {
+            this.nextPlayer();
+            return { success: true, finished: true };
+        }
+        
+        this.nextPlayer();
+        return { success: true };
+    }
+
+    checkFourOfAKind() {
+        if (this.pile.length < 4) return false;
+        
+        const topFour = this.pile.slice(-4);
+        const value = topFour[0].value;
+        return topFour.every(c => c.value === value);
+    }
+
+    checkPlayerFinished(playerId) {
+        const player = this.players.get(playerId);
+        if (!player) return false;
+        
+        if (player.hand.length === 0 && player.faceUp.length === 0 && player.faceDown.length === 0) {
+            if (!player.finished) {
+                player.finished = true;
+                player.finishOrder = this.getFinishedCount();
+            }
+            return true;
+        }
+        return false;
+    }
+
+    getFinishedCount() {
+        let count = 0;
+        for (const [, player] of this.players) {
+            if (player.finished) count++;
+        }
+        return count;
+    }
+
+    pickFromDeck(playerId) {
+        if (this.phase !== 'playing') {
+            return { success: false, error: 'Game not in playing phase' };
+        }
+        
+        const currentPlayerId = this.playerOrder[this.currentPlayerIndex];
+        if (playerId !== currentPlayerId) {
+            return { success: false, error: 'Not your turn' };
+        }
+        
+        if (this.forcedCard) {
+            return { success: false, error: 'Must resolve forced card first' };
+        }
+        
+        const player = this.players.get(playerId);
+        if (!player) {
+            return { success: false, error: 'Player not found' };
+        }
+        
+        if (player.hand.length === 0) {
+            return { success: false, error: 'Can only draw when playing from hand' };
+        }
+        
+        if (this.deck.length === 0) {
+            return { success: false, error: 'Deck is empty' };
+        }
+        
+        const drawnCard = this.deck.shift();
+        
+        // If hand has 3 cards, must play the drawn card
+        if (player.hand.length >= 3) {
+            this.forcedCard = drawnCard;
+            this.forcedPlayerId = playerId;
+            return { 
+                success: true, 
+                forcedCard: drawnCard,
+                mustPlay: true
+            };
+        }
+        
+        // Otherwise, add to hand and sort
+        player.hand.push(drawnCard);
+        player.hand = this.sortCards(player.hand);
+        return { success: true, drawnCard };
+    }
+
+    playForcedCard(playerId) {
+        if (!this.forcedCard || this.forcedPlayerId !== playerId) {
+            return { success: false, error: 'No forced card to play' };
+        }
+        
+        const player = this.players.get(playerId);
+        if (!player) {
+            return { success: false, error: 'Player not found' };
+        }
+        
+        const card = this.forcedCard;
+        
+        if (!this.canPlayCard(card)) {
+            return { success: false, error: 'Cannot play this card - must decline' };
+        }
+        
+        // Play the forced card
+        this.pile.push(card);
+        this.forcedCard = null;
+        this.forcedPlayerId = null;
+        
+        return this.processAfterPlay(playerId, [card]);
+    }
+
+    declineForcedCard(playerId) {
+        if (!this.forcedCard || this.forcedPlayerId !== playerId) {
+            return { success: false, error: 'No forced card to decline' };
+        }
+        
+        const player = this.players.get(playerId);
+        if (!player) {
+            return { success: false, error: 'Player not found' };
+        }
+        
+        // Add forced card and pile to hand
+        player.hand.push(this.forcedCard, ...this.pile);
+        // BUG 4 FIX: Sort the hand after picking up
+        player.hand = this.sortCards(player.hand);
         this.pile = [];
         this.mustPlayLowCard = false;
+        this.forcedCard = null;
+        this.forcedPlayerId = null;
+        
         this.nextPlayer();
-        return { action: `${player.name} flipped ${this.formatCard(card)} - picked up! 😅` };
-      }
-
-      this.pile.push(card);
-      this.mustPlayLowCard = false;
-
-      let action = `${player.name} flipped ${this.formatCard(card)}`;
-      let sameTurn = false;
-
-      const result = this.handleSpecialCard(card, player);
-      action += result.suffix;
-      sameTurn = result.sameTurn;
-
-      if (!sameTurn) this.nextPlayer();
-
-      this.checkPlayerFinished(player);
-      if (player.finished) action += ` - ${player.name} is OUT! 🎉`;
-
-      return { action };
+        return { success: true, pickedUp: true };
     }
 
-    // Normal play
-    if (!this.canPlayCard(cards[0])) {
-      if (this.mustPlayLowCard) {
-        return { error: 'Must play 7 or lower! (or 2, 3, 10)' };
-      }
-      return { error: 'Card too low!' };
+    // BUG 2 FIX: pickUpPile should NOT advance to next player
+    // The same player continues their turn after picking up
+    pickUpPile(playerId) {
+        if (this.phase !== 'playing') {
+            return { success: false, error: 'Game not in playing phase' };
+        }
+        
+        const currentPlayerId = this.playerOrder[this.currentPlayerIndex];
+        if (playerId !== currentPlayerId) {
+            return { success: false, error: 'Not your turn' };
+        }
+        
+        if (this.forcedCard) {
+            return { success: false, error: 'Must resolve forced card first' };
+        }
+        
+        const player = this.players.get(playerId);
+        if (!player) {
+            return { success: false, error: 'Player not found' };
+        }
+        
+        if (this.pile.length === 0) {
+            return { success: false, error: 'Pile is empty' };
+        }
+        
+        player.hand.push(...this.pile);
+        // BUG 4 FIX: Sort the hand after picking up
+        player.hand = this.sortCards(player.hand);
+        this.pile = [];
+        this.mustPlayLowCard = false;
+        
+        // BUG 2 FIX: Do NOT call nextPlayer() here
+        // The same player must play a card after picking up the pile
+        // They now have cards and must play one
+        
+        return { success: true, samePlayerContinues: true };
     }
 
-    // Remove cards
-    const sorted = [...uniqueIndices].sort((a, b) => b - a);
-    for (const idx of sorted) {
-      player[source].splice(idx, 1);
+    nextPlayer() {
+        let attempts = 0;
+        do {
+            this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.playerOrder.length;
+            attempts++;
+            
+            const player = this.players.get(this.playerOrder[this.currentPlayerIndex]);
+            if (!player.finished) {
+                return;
+            }
+        } while (attempts < this.playerOrder.length);
     }
 
-    this.pile.push(...cards);
-
-    // Draw if from hand
-    if (source === 'hand') {
-      while (player.hand.length < 3 && this.deck.length > 0) {
-        player.hand.push(this.deck.pop());
-      }
+    isGameOver() {
+        let unfinishedCount = 0;
+        for (const [, player] of this.players) {
+            if (!player.finished) {
+                unfinishedCount++;
+            }
+        }
+        return unfinishedCount <= 1;
     }
 
-    const cardNames = cards.map(c => this.formatCard(c)).join(', ');
-    let action = `${player.name} played ${cardNames}`;
-    let sameTurn = false;
-
-    this.mustPlayLowCard = false;
-    const result = this.handleSpecialCard(cards[0], player, cards.length);
-    action += result.suffix;
-    sameTurn = result.sameTurn;
-
-    if (!sameTurn) this.nextPlayer();
-
-    this.checkPlayerFinished(player);
-    if (player.finished) action += ` - ${player.name} is OUT! 🎉`;
-
-    return { action };
-  }
-
-  handleSpecialCard(card, player, count = 1) {
-    let suffix = '';
-    let sameTurn = false;
-
-    if (this.checkFourOfAKind()) {
-      this.burnPile();
-      suffix = ' - FOUR OF A KIND BURN! 🔥🔥';
-      sameTurn = true;
-    } else if (card.value === '10') {
-      this.burnPile();
-      suffix = ' - BURN! 🔥';
-      sameTurn = true;
-    } else if (card.value === '3') {
-      const effective = this.getEffectiveTopCard();
-      suffix = effective
-        ? ` (transparent - beat ${effective.value}) 👻`
-        : ' (transparent) 👻';
-    } else if (card.value === '7') {
-      this.mustPlayLowCard = true;
-      suffix = ' - Next plays ≤7! ⬇️';
+    getLoser() {
+        for (const [, player] of this.players) {
+            if (!player.finished) {
+                return player;
+            }
+        }
+        return null;
     }
 
-    return { suffix, sameTurn };
-  }
-
-  // ==================== PICK UP PILE ====================
-
-  pickUpPile(playerId) {
-    if (this.forcedCard?.playerId === playerId) {
-      return this.declineForcedCard(playerId);
+    getWinner() {
+        let firstFinished = null;
+        for (const [, player] of this.players) {
+            if (player.finished && player.finishOrder === 1) {
+                firstFinished = player;
+                break;
+            }
+        }
+        return firstFinished;
     }
 
-    const validation = this.validateTurn(playerId);
-    if (!validation.valid) return { error: validation.error };
-
-    const player = validation.player;
-    if (!this.pile?.length) {
-      return { error: 'Pile is empty!' };
+    getStateForPlayer(playerId) {
+        const player = this.players.get(playerId);
+        if (!player) return null;
+        
+        const currentPlayerId = this.playerOrder[this.currentPlayerIndex];
+        
+        const opponents = [];
+        for (const [id, p] of this.players) {
+            if (id !== playerId) {
+                opponents.push({
+                    id: p.id,
+                    name: p.name,
+                    handCount: p.hand.length,
+                    faceUp: p.faceUp,
+                    faceDownCount: p.faceDown.length,
+                    ready: p.ready,
+                    finished: p.finished
+                });
+            }
+        }
+        
+        return {
+            phase: this.phase,
+            hand: player.hand,
+            faceUp: player.faceUp,
+            faceDown: player.faceDown,
+            faceDownCount: player.faceDown.length,
+            pile: this.pile,
+            pileTop: this.pile.length > 0 ? this.pile[this.pile.length - 1] : null,
+            pileCount: this.pile.length,
+            deckCount: this.deck.length,
+            opponents,
+            isMyTurn: currentPlayerId === playerId,
+            currentPlayer: this.players.get(currentPlayerId)?.name || 'Unknown',
+            mustPlayLowCard: this.mustPlayLowCard,
+            ready: player.ready,
+            finished: player.finished,
+            forcedCard: this.forcedPlayerId === playerId ? this.forcedCard : null,
+            effectiveTopCard: this.getEffectiveTopCard()
+        };
     }
-
-    player.hand.push(...this.pile);
-    this.pile = [];
-    this.mustPlayLowCard = false;
-    this.nextPlayer();
-
-    return { action: `${player.name} picked up the pile 📥` };
-  }
-
-  // ==================== GAME STATE ====================
-
-  getStateForPlayer(playerId) {
-    const player = this.getPlayer(playerId);
-    const current = this.getCurrentPlayer();
-    const effective = this.getEffectiveTopCard();
-
-    const hasForcedCard = this.forcedCard?.playerId === playerId;
-    const forcedCardData = hasForcedCard ? this.forcedCard.card : null;
-    const canPlayForced = hasForcedCard ? this.canPlayCard(this.forcedCard.card) : false;
-
-    return {
-      phase: this.phase,
-      currentPlayer: current?.id || null,
-      currentPlayerName: current?.name || 'Unknown',
-      pile: this.pile || [],
-      pileCount: this.pile?.length || 0,
-      effectiveTopCard: effective,
-      mustPlayLowCard: this.mustPlayLowCard,
-      deckCount: this.deck?.length || 0,
-      burnedCount: this.burnedCards?.length || 0,
-
-      myHand: player?.hand || [],
-      myFaceUp: player?.faceUp || [],
-      myFaceDownCount: player?.faceDown?.length || 0,
-      amIFinished: player?.finished || false,
-
-      hasForcedCard,
-      forcedCard: forcedCardData,
-      canPlayForcedCard: canPlayForced,
-
-      isGameOver: this.isGameOver(),
-
-      opponents: this.players
-        .filter(p => p.id !== playerId)
-        .map(p => ({
-          id: p.id,
-          name: p.name,
-          handCount: p.hand?.length || 0,
-          faceUp: p.faceUp || [],
-          faceDownCount: p.faceDown?.length || 0,
-          finished: p.finished
-        }))
-    };
-  }
 }
 
 module.exports = Game;
